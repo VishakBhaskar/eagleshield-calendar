@@ -1,0 +1,19 @@
+# Local development defaults. Copy to .env.local and replace every secret.
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/eagle_shield
+DATABASE_SSL=disable
+SESSION_SECRET=replace_with_at_least_32_random_bytes
+MASTER_ADMIN_EMAIL=admin@eagleshield.com
+MASTER_ADMIN_PASSWORD=replace_with_a_long_initial_password
+
+CAL_MODE=mock
+CAL_SAC_API_KEY=cal_replace_sacramento
+CAL_SAC_EVENT_TYPE_ID=replace_sacramento_event_type_id
+CAL_SAC_WEBHOOK_SECRET=replace_sacramento_webhook_secret
+CAL_EB_API_KEY=cal_replace_east_bay
+CAL_EB_EVENT_TYPE_ID=replace_east_bay_event_type_id
+CAL_EB_WEBHOOK_SECRET=replace_east_bay_webhook_secret
+CAL_HOLD_EMAIL=calendar@eagleshield.com
+
+CRON_SECRET=replace_with_a_different_long_random_secret
+VOICE_AGENT_SECRET=replace_with_a_third_long_random_secret
+APP_URL=http://localhost:3000

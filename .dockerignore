@@ -1,0 +1,11 @@
+node_modules
+.next
+dist
+.git
+.env*
+.dev.vars*
+.npm-cache
+.wrangler
+*.log
+*.sqlite*
+coverage
