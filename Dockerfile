@@ -25,4 +25,4 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/db/schema.sql ./db/schema.sql
 EXPOSE 3000
-CMD ["sh", "-c", "node scripts/migrate.mjs && node server.js"]
+CMD ["sh", "-c", "node scripts/migrate.mjs && node scripts/start.mjs"]

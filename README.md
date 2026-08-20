@@ -39,17 +39,17 @@ The Bulk block times dialog accepts one or both locations, a start/end date, sel
 - A bearer-protected app booking endpoint for voice agents that need a single reliable gateway.
 - A repair endpoint that reconciles Cal bookings and retries pending capacity holds/cancellations.
 - PostgreSQL constraints that prevent overbooking a location lane or assigning one rep to overlapping appointments.
-- Railway Docker build, automatic schema migration, deployment health check, and a short-lived cron command.
+- Railway Docker build, automatic schema migration, deployment health check, and embedded five-minute reconciliation.
 
 ## Cal.com setup
 
-1. Create or use a standalone Cal.com account for Sacramento and another for East Bay. Connect each to its own destination calendar.
+1. Create or use a standalone Cal.com account for Sacramento and another for East Bay. An external Google/Outlook destination calendar is optional; Cal.com itself remains the booking source of truth. If you connect external calendars later, keep each account isolated to its own location.
 2. Set both accounts to `America/Los_Angeles` and configure the appointment schedule. The app's current slot starts are 10:00 AM, 1:00 PM, and 4:00 PM with 120-minute duration.
 3. In Sacramento, create an individual event type with seats enabled and exactly two seats per time slot. Enable showing attendees so the API and webhook payloads consistently expose seat identifiers.
 4. In East Bay, create a normal individual event type. Do not enable multiple seats.
 5. Create an API key in each Cal account and copy each event type's numeric ID.
 6. In each account, create a webhook pointing to `https://YOUR_DOMAIN/api/webhooks/cal`. Give the two webhooks different long secrets. Enable at least `BOOKING_CREATED`, `BOOKING_REQUESTED`, `BOOKING_RESCHEDULED`, `BOOKING_CANCELLED`, `BOOKING_CONFIRMED`, and `BOOKING_REJECTED`. Do not use a custom payload template.
-7. Put the two keys, IDs, and webhook secrets into the Railway variables shown below. After deployment, sign in as the master admin and issue `POST /api/setup/cal` with the session cookie. It validates both credentials/event types and refuses a Sacramento capacity other than two.
+7. Put the two keys, IDs, and webhook secrets into the Railway variables shown below. Run `railway run -s eagleshield-calendar npm.cmd run cal:configure` to idempotently configure and verify both event types, in-person booking fields, capacities, and signed webhooks. After deployment, sign in as the master admin and issue `POST /api/setup/cal` with the session cookie for an application-level validation.
 
 `CAL_HOLD_EMAIL` should be a real mailbox or accepted alias you control. The app creates unique `+capacity-...` addresses from it so each hold gets a distinct seated attendee. A mailbox rule can archive Cal notifications sent to that alias.
 
@@ -77,11 +77,12 @@ CAL_HOLD_EMAIL=calendar@eagleshield.com
 
 CRON_SECRET=a_long_reconciliation_secret
 VOICE_AGENT_SECRET=a_different_long_voice_gateway_secret
+RECONCILE_INTERVAL_MS=300000
 ```
 
 The start command runs `db/schema.sql` idempotently before starting the compiled Next.js server. Keep the app at one replica until a shared rate limiter/lock service is added; Postgres still enforces booking capacity if two requests race.
 
-For reconciliation, create a second Railway service from the same repository. Give it `APP_URL` and `CRON_SECRET`, set its custom start command to `npm run cron:reconcile`, and set the cron schedule to `*/5 * * * *`. The command calls the protected repair endpoint and exits, as Railway cron jobs require.
+Reconciliation runs inside the same Railway app service: it waits for the server, repairs missed webhooks and pending Cal writes immediately after startup, then repeats every five minutes. `CRON_SECRET` protects the repair endpoint and the Postgres lock prevents overlapping runs. Do not create a second Railway cron service.
 
 After the first deploy:
 
@@ -90,7 +91,8 @@ After the first deploy:
 3. Use the plus button beside Reps to add each manager/staff user and give them an initial password of at least 12 characters.
 4. Create a one-seat Sacramento test block, confirm one booking still succeeds and a second is rejected, then remove the block.
 5. Create a test booking directly through each public Cal event page and verify it appears in the app within 30 seconds (normally immediately through the webhook).
-6. Confirm `/api/health` reports `database: "ok"`, zero failed webhooks, and zero unsynced records.
+6. Confirm `/api/health` reports `status: "ok"`, `database: "ok"`, no missing secrets, zero failed webhooks/unsynced records, and a recent non-null `lastReconcileAt`.
+7. Confirm Railway logs contain `Embedded reconciliation completed.` and `Embedded reconciliation scheduled every 300000ms.`.
 
 ## Voice agent
 
@@ -132,8 +134,8 @@ npm test
 - Seal production secrets in Railway after setup.
 - Keep both Cal event types dedicated to this business workflow; do not let unrelated event types share their destination calendars.
 - Monitor the JSON from `/api/health` externally after deployment. Railway's deploy health check only proves startup; it is not continuous monitoring.
-- Run reconciliation every five minutes even when webhooks are healthy.
+- Keep embedded reconciliation enabled every five minutes even when webhooks are healthy.
 - Back up PostgreSQL and periodically test restoring it. Cal is the booking/capacity source of truth; Postgres is the operational mirror, assignment store, user store, and audit trail.
 - Before going live, repeat the seat/cancellation test above in a staging pair of Cal accounts using the actual plan and settings that production will use.
 
-Primary references: [Cal.com seated event types](https://cal.com/docs/api-reference/v2/event-types/create-an-event-type), [available seated slots](https://cal.com/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type), [seat-specific cancellation](https://cal.com/docs/api-reference/v2/bookings/cancel-a-booking), [webhook signatures](https://cal.com/docs/developing/guides/automation/webhooks), [Railway PostgreSQL](https://docs.railway.com/databases/postgresql), [Railway variables](https://docs.railway.com/variables), and [Railway cron jobs](https://docs.railway.com/cron-jobs).
+Primary references: [Cal.com seated event types](https://cal.com/docs/api-reference/v2/event-types/create-an-event-type), [available seated slots](https://cal.com/docs/api-reference/v2/slots/get-available-time-slots-for-an-event-type), [seat-specific cancellation](https://cal.com/docs/api-reference/v2/bookings/cancel-a-booking), [webhook signatures](https://cal.com/docs/developing/guides/automation/webhooks), [Railway PostgreSQL](https://docs.railway.com/databases/postgresql), and [Railway variables](https://docs.railway.com/variables).

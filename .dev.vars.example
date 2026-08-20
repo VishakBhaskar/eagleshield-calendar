@@ -16,4 +16,5 @@ CAL_HOLD_EMAIL=calendar@eagleshield.com
 
 CRON_SECRET=replace_with_a_different_long_random_secret
 VOICE_AGENT_SECRET=replace_with_a_third_long_random_secret
+RECONCILE_INTERVAL_MS=300000
 APP_URL=http://localhost:3000

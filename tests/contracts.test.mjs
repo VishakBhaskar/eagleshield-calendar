@@ -73,10 +73,18 @@ test("the preserved prototype surface remains available", async () => {
 
 test("Railway image uses the Next standalone asset layout", async () => {
   const dockerfile = await readFile(new URL("Dockerfile", root), "utf8");
+  const start = await readFile(new URL("scripts/start.mjs", root), "utf8");
+  const readme = await readFile(new URL("README.md", root), "utf8");
   assert.match(dockerfile, /\/app\/\.next\/standalone \.\//);
   assert.match(dockerfile, /\/app\/\.next\/static \.\/\.next\/static/);
-  assert.match(dockerfile, /node server\.js/);
+  assert.match(dockerfile, /node scripts\/start\.mjs/);
   assert.doesNotMatch(dockerfile, /COPY --from=build \/app\/\.next \.\/\.next/);
+  assert.match(start, /RECONCILE_INTERVAL_MS/);
+  assert.match(start, /\/api\/cron\/reconcile/);
+  assert.match(start, /response\.status === 409/);
+  assert.match(start, /setInterval\(reconcile, intervalMs\)/);
+  assert.match(readme, /Reconciliation runs inside the same Railway app service/);
+  assert.doesNotMatch(readme, /create a second Railway service/);
 });
 
 test("login surface matches the Eagle Shield operations design", async () => {
