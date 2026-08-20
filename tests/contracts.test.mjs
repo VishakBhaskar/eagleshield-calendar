@@ -70,3 +70,26 @@ test("the preserved prototype surface remains available", async () => {
     assert.ok(css.includes(selector), selector);
   }
 });
+
+test("Railway image uses the Next standalone asset layout", async () => {
+  const dockerfile = await readFile(new URL("Dockerfile", root), "utf8");
+  assert.match(dockerfile, /\/app\/\.next\/standalone \.\//);
+  assert.match(dockerfile, /\/app\/\.next\/static \.\/\.next\/static/);
+  assert.match(dockerfile, /node server\.js/);
+  assert.doesNotMatch(dockerfile, /COPY --from=build \/app\/\.next \.\/\.next/);
+});
+
+test("login surface matches the Eagle Shield operations design", async () => {
+  const page = await readFile(new URL("app/login/page.tsx", root), "utf8");
+  const form = await readFile(new URL("app/login/login-form.tsx", root), "utf8");
+  const css = await readFile(new URL("app/globals.css", root), "utf8");
+  for (const text of ["Operations workspace", "Sacramento", "East Bay", "Private workspace"]) {
+    assert.match(page, new RegExp(text));
+  }
+  for (const text of ["Welcome back", "Sign in to calendar", "Protected 12-hour staff session"]) {
+    assert.match(form, new RegExp(text));
+  }
+  for (const selector of [".login-window", ".login-overview", ".login-entry", ".login-location"]) {
+    assert.ok(css.includes(selector), selector);
+  }
+});

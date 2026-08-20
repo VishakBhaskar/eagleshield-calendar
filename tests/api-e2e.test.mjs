@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { cp } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,19 @@ const appPort = 3100;
 const calPort = 4100;
 const appBase = `http://127.0.0.1:${appPort}`;
 const calBase = `http://127.0.0.1:${calPort}`;
+
+async function stageStandaloneAssets() {
+  await cp(
+    fileURLToPath(new URL("../.next/static", import.meta.url)),
+    fileURLToPath(new URL("../.next/standalone/.next/static", import.meta.url)),
+    { recursive: true },
+  );
+  await cp(
+    fileURLToPath(new URL("../public", import.meta.url)),
+    fileURLToPath(new URL("../.next/standalone/public", import.meta.url)),
+    { recursive: true },
+  );
+}
 
 function json(response, status, body) {
   response.writeHead(status, { "content-type": "application/json" });
@@ -242,6 +256,7 @@ async function request(path, { cookie = "", expected = 200, ...init } = {}) {
 }
 
 test("Railway app, two Cal locations, seated holds, bulk blocks, auth, assignments, webhooks, and repair run end to end", { timeout: 60_000 }, async () => {
+  await stageStandaloneAssets();
   const fakeCal = createFakeCal();
   await listen(fakeCal.server, calPort);
   const app = new Worker(fileURLToPath(new URL("support/standalone-worker.mjs", import.meta.url)), {
@@ -283,6 +298,16 @@ test("Railway app, two Cal locations, seated holds, bulk blocks, auth, assignmen
   });
   try {
     await waitForApp(() => appExitCode);
+    const loginPage = await fetch(`${appBase}/login`);
+    const loginHtml = await loginPage.text();
+    assert.equal(loginPage.status, 200);
+    assert.match(loginHtml, /Welcome back/);
+    const cssPath = loginHtml.match(/href="([^"]+\.css[^"]*)/)?.[1];
+    const scriptPath = loginHtml.match(/src="([^"]+\.js[^"]*)/)?.[1];
+    assert.ok(cssPath, "login page includes its compiled stylesheet");
+    assert.ok(scriptPath, "login page includes its client runtime");
+    assert.equal((await fetch(new URL(cssPath, appBase))).status, 200);
+    assert.equal((await fetch(new URL(scriptPath, appBase))).status, 200);
     await request("/api/calendar?from=2027-01-01&to=2027-01-31", { expected: 401 });
     assert.equal((await login("master@eagleshield.test", "wrong-password")).response.status, 401);
     const master = await login("master@eagleshield.test", "MasterPassword!2026");

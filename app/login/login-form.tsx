@@ -16,6 +16,8 @@ export function LoginForm() {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: form.get("email"), password: form.get("password") }),
       });
@@ -32,20 +34,28 @@ export function LoginForm() {
 
   return (
     <form className="login-card" onSubmit={submit}>
-      <div className="login-brand">
-        <div className="shield" aria-hidden="true" />
-        <div>
-          <h1>Eagle Shield Calendar</h1>
-          <div className="sub">Appointment Operations</div>
-        </div>
-      </div>
-      <div className="login-rule" />
-      <h2>Sign in</h2>
-      <p>Use the Eagle Shield account provided by your administrator.</p>
+      <header className="login-form-head">
+        <div className="login-eyebrow">Secure staff access</div>
+        <h2>Welcome back</h2>
+        <p>Sign in with the Eagle Shield account provided by your administrator.</p>
+      </header>
       {error && <div className="login-error" role="alert">{error}</div>}
-      <label>Email address<input name="email" type="email" autoComplete="username" required autoFocus /></label>
-      <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
-      <button className="btn primary login-submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+      <label>
+        <span>Email address</span>
+        <input name="email" type="email" inputMode="email" autoCapitalize="none" autoComplete="username" placeholder="name@eagleshield.com" required autoFocus />
+      </label>
+      <label>
+        <span>Password</span>
+        <input name="password" type="password" autoComplete="current-password" placeholder="Enter your password" required />
+      </label>
+      <button className="btn primary login-submit" disabled={busy}>
+        <span>{busy ? "Signing in…" : "Sign in to calendar"}</span>
+        {!busy && <span aria-hidden="true">→</span>}
+      </button>
+      <div className="login-session-note">
+        <span aria-hidden="true">●</span>
+        Protected 12-hour staff session
+      </div>
     </form>
   );
 }

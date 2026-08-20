@@ -15,11 +15,14 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
-COPY --from=build /app/package.json /app/package-lock.json ./
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/.next ./.next
+
+# Next standalone expects server.js, its traced node_modules, and .next/static
+# to share this runtime root. Copying all of .next beside standalone/server.js
+# makes HTML render but leaves every CSS/JS asset at a path the server cannot see.
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/db/schema.sql ./db/schema.sql
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["sh", "-c", "node scripts/migrate.mjs && node server.js"]
