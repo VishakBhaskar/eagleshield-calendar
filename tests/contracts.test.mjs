@@ -57,11 +57,35 @@ test("calendar availability and webhook failures fail closed and remain repairab
   const client = await readFile(new URL("app/calendar-app.tsx", root), "utf8");
   const webhooks = await readFile(new URL("lib/cal-webhooks.ts", root), "utf8");
   assert.match(calendar, /getProviderAvailability/);
-  assert.match(client, /Closed in Cal\.com/);
+  assert.match(client, /showProviderBlock/);
+  assert.doesNotMatch(client, /Closed in Cal\.com/);
   assert.match(client, /providerOpenSeats/);
   assert.match(webhooks, /state='failed'/);
   assert.match(webhooks, /attempt_count=attempt_count\+1/);
   assert.match(webhooks, /retryFailedCalWebhooks/);
+});
+
+test("calendar appointments and destructive actions use designed in-app modals", async () => {
+  const client = await readFile(new URL("app/calendar-app.tsx", root), "utf8");
+  const css = await readFile(new URL("app/globals.css", root), "utf8");
+  assert.doesNotMatch(client, /window\.confirm/);
+  for (const token of [
+    'type: "appointment"',
+    'type: "cancel-appointment"',
+    'type: "remove-block"',
+    "Appointment details",
+    "Cancel appointment",
+    "Remove block",
+    "Reschedule",
+  ]) assert.ok(client.includes(token), token);
+  for (const selector of [
+    ".appointment-seat",
+    ".appointment-panel",
+    ".confirm-panel",
+    ".modal-close",
+    ".btn.danger",
+    ".blocked.blockseat",
+  ]) assert.ok(css.includes(selector), selector);
 });
 
 test("bulk blocking supports ranges, weekdays, locations, times, and per-location seats", async () => {

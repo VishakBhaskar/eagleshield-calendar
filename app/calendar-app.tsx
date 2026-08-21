@@ -25,7 +25,10 @@ type Modal =
   | ({ type: "book" } & SlotContext)
   | ({ type: "block" } & SlotContext)
   | { type: "bulk-block" }
+  | { type: "appointment"; appointment: Appointment }
   | { type: "reschedule"; appointment: Appointment }
+  | { type: "cancel-appointment"; appointment: Appointment }
+  | { type: "remove-block"; block: CapacityBlock }
   | { type: "reps" }
   | null;
 
@@ -75,6 +78,26 @@ const prettyDate = (date: string) =>
     year: "numeric",
     timeZone: "UTC",
   });
+
+const appointmentInitials = (appointment: Appointment) =>
+  appointment.customerName
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "ES";
+
+function visuallyBlocked(state: CellState) {
+  const unbookedCapacity = Math.max(0, state.capacity - state.booked.length);
+  const locallyUnblockedCapacity = Math.max(0, unbookedCapacity - state.blockedLaneIds.length);
+  return state.cutoff || (
+    unbookedCapacity > 0 && (
+      state.blockedLaneIds.length >= unbookedCapacity ||
+      (state.providerClosed && locallyUnblockedCapacity > 0)
+    )
+  );
+}
 
 function startOfWeek(date: string) {
   const dow = asDate(date).getUTCDay();
@@ -325,18 +348,6 @@ export function CalendarApp() {
             }),
             repId ? "Team member assigned" : "Appointment unassigned",
           )}
-          cancel={(appointment) => {
-            if (window.confirm(`Cancel ${appointment.confirmation}?`)) {
-              void run(
-                () => api(`/api/appointments/${appointment.id}`, {
-                  method: "PATCH",
-                  headers: { "Idempotency-Key": crypto.randomUUID() },
-                  body: JSON.stringify({ action: "cancel" }),
-                }),
-                "Appointment cancelled",
-              );
-            }
-          }}
         />
       )}
 
@@ -444,32 +455,28 @@ function WeekGrid(props: CalendarProps) {
       <tbody>{props.data.settings.slots.map((slot) => <tr key={slot}>
         <th className="slotcell">{slotLabel(slot)}<span className="ap">2 hrs</span></th>
         {dates.map((date) => <td className="cell" key={date}>{props.data.territories.filter((territory) => props.visible[territory.id]).map((territory) => (
-          <TerritoryCell key={territory.id} data={props.data} territoryId={territory.id} date={date} slot={slot} state={props.stateFor(territory.id, date, slot)} open={props.open} reload={props.reload} notify={props.notify} />
+          <TerritoryCell key={territory.id} data={props.data} territoryId={territory.id} date={date} slot={slot} state={props.stateFor(territory.id, date, slot)} open={props.open} />
         ))}</td>)}
       </tr>)}</tbody>
     </table>
   );
 }
 
-function TerritoryCell({ data, territoryId, date, slot, state, open, reload, notify }: {
-  data: CalendarPayload; territoryId: TerritoryId; date: string; slot: string; state: CellState; open: (modal: Modal) => void; reload: (quiet?: boolean) => Promise<void>; notify: (message: string) => void;
+function TerritoryCell({ data, territoryId, date, slot, state, open }: {
+  data: CalendarPayload; territoryId: TerritoryId; date: string; slot: string; state: CellState; open: (modal: Modal) => void;
 }) {
   const rep = (id: string) => data.reps.find((item) => item.id === id);
   const applicable = data.blocks.filter((block) => blockApplies(block, territoryId, date, slot));
-  const remove = async (block: CapacityBlock) => {
-    if (!window.confirm(`Remove the ${block.recurrence === "weekly" ? "recurring " : ""}capacity block?`)) return;
-    try {
-      await api(`/api/blocks/${block.ruleId}`, { method: "DELETE" });
-      notify("Capacity block removed");
-      await reload(true);
-    } catch (caught) { notify(caught instanceof Error ? caught.message : "Block could not be removed"); }
-  };
   const openSlots = state.openLaneIds.length;
+  const showProviderBlock = state.providerClosed && Math.max(
+    0,
+    state.capacity - state.booked.length - state.blockedLaneIds.length,
+  ) > 0;
   return <div className={`terrblock ${territoryId === "SAC" ? "tb-sac" : "tb-eb"}`}>
     <div className="hd"><span className="dot" style={{ background: territoryId === "SAC" ? "var(--sac)" : "var(--eb)" }} />{territoryId === "SAC" ? "Sacramento" : "East Bay"}</div>
-    {state.booked.map((appointment) => <div className={`seat ${appointment.status === "Expired" ? "expired" : ""}`} key={appointment.id} title={`${appointment.confirmation} · ${rep(appointment.repId)?.name ?? "Unassigned"}`}><span className="rp">{rep(appointment.repId)?.initials ?? "?"}</span><span className="cn">{appointment.customerName}</span></div>)}
-    {applicable.map((block) => <button className="norep blockseat" key={block.id} onClick={() => void remove(block)}>Blocked · click to remove</button>)}
-    {state.cutoff ? <button className="blocked" disabled>After-hours cutoff</button> : state.providerClosed ? <button className="blocked" disabled>Closed in Cal.com</button> : <>
+    {state.booked.map((appointment) => <button type="button" className={`seat appointment-seat ${appointment.status === "Expired" ? "expired" : ""}`} key={appointment.id} title={`${appointment.confirmation} · ${rep(appointment.repId)?.name ?? "Unassigned"}`} aria-label={`Open appointment ${appointment.confirmation} for ${appointment.customerName}`} onClick={() => open({ type: "appointment", appointment })}><span className="rp">{rep(appointment.repId)?.initials ?? appointmentInitials(appointment)}</span><span className="cn">{appointment.customerName}</span><span className="seat-action" aria-hidden="true">›</span></button>)}
+    {applicable.map((block) => <button className="blocked blockseat" key={block.id} onClick={() => open({ type: "remove-block", block })}>Blocked</button>)}
+    {state.cutoff ? <button className="blocked" disabled>After-hours cutoff</button> : showProviderBlock ? <button className="blocked" disabled>Blocked</button> : <>
       {Array.from({ length: state.openBookable }, (_, index) => <button className="seatopen" key={`open-${index}`} onClick={() => open({ type: "choose", territoryId, date, slot })}>＋ Open seat</button>)}
       {Array.from({ length: Math.max(0, openSlots - state.openBookable) }, (_, index) => <button className="norep" key={`norep-${index}`} disabled>No eligible rep</button>)}
     </>}
@@ -481,13 +488,18 @@ function MonthGrid(props: CalendarProps) {
   const today = zonedDateParts(props.data.serverNow, props.data.settings.timeZone).date;
   return <table className="month"><thead><tr>{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <th key={day}>{day}</th>)}</tr></thead><tbody>{Array.from({ length: 6 }, (_, row) => <tr key={row}>{cells.slice(row * 7, row * 7 + 7).map((cell) => {
     const sunday = asDate(cell.date).getUTCDay() === 0;
-    const counts = props.data.settings.slots.map((slot) => props.data.territories.filter((territory) => props.visible[territory.id]).reduce((sum, territory) => sum + props.stateFor(territory.id, cell.date, slot).openBookable, 0));
-    const cutoff = props.data.territories.some((territory) => props.stateFor(territory.id, cell.date, props.data.settings.slots[0]).cutoff);
     const visibleTerritories = props.data.territories.filter((territory) => props.visible[territory.id]);
-    const providerClosed = visibleTerritories.length > 0 && visibleTerritories.every((territory) => props.stateFor(territory.id, cell.date, props.data.settings.slots[0]).providerClosed);
+    const summaries = props.data.settings.slots.map((slot) => {
+      const states = visibleTerritories.map((territory) => props.stateFor(territory.id, cell.date, slot));
+      return {
+        count: states.reduce((sum, state) => sum + state.openBookable, 0),
+        blocked: states.length > 0 && states.every(visuallyBlocked),
+      };
+    });
+    const blockedDay = summaries.length > 0 && summaries.every((summary) => summary.blocked);
     return <td key={cell.date} className={`${cell.current ? "" : "dim"} ${sunday ? "sun" : ""} ${cell.date === today ? "mtoday" : ""}`} onClick={() => { if (!sunday && cell.current) { props.setAnchor(cell.date); props.setView("week"); } }}>
-      <div className="mday">{Number(cell.date.slice(8))}{cutoff && <span className="mcutt">cutoff</span>}{!cutoff && providerClosed && <span className="mcutt">closed</span>}</div>
-      {cell.current && !sunday && <div className="mslots">{props.data.settings.slots.map((slot, index) => <div className={`mslot ${cutoff || providerClosed ? "blk" : counts[index] ? "open" : "zero"}`} key={slot}><span>{slotLabel(slot)}</span><b>{counts[index]}</b></div>)}</div>}
+      <div className="mday">{Number(cell.date.slice(8))}{blockedDay && <span className="mcutt">blocked</span>}</div>
+      {cell.current && !sunday && <div className="mslots">{props.data.settings.slots.map((slot, index) => <div className={`mslot ${summaries[index].blocked ? "blk" : summaries[index].count ? "open" : "zero"}`} key={slot}><span>{slotLabel(slot)}</span><b>{summaries[index].count}</b></div>)}</div>}
     </td>;
   })}</tr>)}</tbody></table>;
 }
@@ -503,18 +515,19 @@ function SchedulingView({ data, anchor, territoryId, setTerritoryId, stateFor, s
       const openCount = data.settings.slots.reduce((sum, slot) => sum + stateFor(territoryId, cell.date, slot).openBookable, 0);
       const tone = !cell.current ? "mh-blank" : openCount === 0 ? "mh-full" : openCount < capacity ? "mh-mid" : "mh-open";
       return <td key={cell.date} className={`${tone} ${cell.date === anchor ? "sel" : ""}`} onClick={() => cell.current && setAnchor(cell.date)}>{cell.current ? Number(cell.date.slice(8)) : ""}</td>;
-    })}</tr>)}</tbody></table><div className="sched-legend"><div className="row"><span className="box" style={{ background: "#4caf50" }} />Good availability</div><div className="row"><span className="box" style={{ background: "#f4c400" }} />Limited</div><div className="row"><span className="box" style={{ background: "#e0554d" }} />Full / closed</div></div></aside>
+    })}</tr>)}</tbody></table><div className="sched-legend"><div className="row"><span className="box" style={{ background: "#4caf50" }} />Good availability</div><div className="row"><span className="box" style={{ background: "#f4c400" }} />Limited</div><div className="row"><span className="box" style={{ background: "#e0554d" }} />Full / blocked</div></div></aside>
     <section className="sched-main"><div className="sched-head"><div className="fld"><label>Territory</label><select value={territoryId} onChange={(event) => setTerritoryId(event.target.value as TerritoryId)}><option value="SAC">Sacramento</option><option value="EB">East Bay</option></select></div><div><div className="fld"><label>Appointment type</label></div><div className="apptype">Free Estimate · 2 hours</div></div><div className="sched-note">Select a green cell to create an appointment. Availability reflects Cal.com, location capacity, blocks, and cutoff rules.</div></div>
       <table className="sgrid"><thead><tr><th className="slotlab" />{dates.map((date) => <th key={date}><div className="sd">{dayName(date)}</div><div className="sdt">{Number(date.slice(8))}</div><div className="stot">{data.settings.slots.reduce((sum, slot) => sum + stateFor(territoryId, date, slot).openBookable, 0)} open</div></th>)}</tr></thead><tbody>{data.settings.slots.map((slot) => <tr key={slot}><th className="slotlab">{slotLabel(slot)}</th>{dates.map((date) => {
         const state = stateFor(territoryId, date, slot);
-        return <td key={date}><button className={`scell ${state.cutoff || state.providerClosed ? "blk" : state.openBookable ? "open" : "zero"}`} disabled={!state.openBookable} onClick={() => open({ type: "book", territoryId, date, slot })}>{state.openBookable}<span className="cq">{state.cutoff ? "cutoff" : state.providerClosed ? "closed" : "seats"}</span></button></td>;
+        const blocked = visuallyBlocked(state);
+        return <td key={date}><button className={`scell ${blocked ? "blk" : state.openBookable ? "open" : "zero"}`} disabled={!state.openBookable} onClick={() => open({ type: "book", territoryId, date, slot })}>{state.openBookable}<span className="cq">{blocked ? "blocked" : "seats"}</span></button></td>;
       })}</tr>)}</tbody></table>
     </section>
   </div>;
 }
 
-function AppointmentLog({ data, search, setSearch, territory, setTerritory, status, setStatus, open, cancel, assign }: {
-  data: CalendarPayload; search: string; setSearch: (value: string) => void; territory: string; setTerritory: (value: string) => void; status: string; setStatus: (value: string) => void; open: (modal: Modal) => void; cancel: (appointment: Appointment) => void; assign: (appointment: Appointment, repId: string) => void;
+function AppointmentLog({ data, search, setSearch, territory, setTerritory, status, setStatus, open, assign }: {
+  data: CalendarPayload; search: string; setSearch: (value: string) => void; territory: string; setTerritory: (value: string) => void; status: string; setStatus: (value: string) => void; open: (modal: Modal) => void; assign: (appointment: Appointment, repId: string) => void;
 }) {
   const rows = useMemo(() => data.appointments.filter((appointment) => {
     const needle = search.toLowerCase();
@@ -523,24 +536,65 @@ function AppointmentLog({ data, search, setSearch, territory, setTerritory, stat
   }).sort((a, b) => b.startAt.localeCompare(a.startAt)), [data.appointments, search, territory, status]);
   const rep = (id: string) => data.reps.find((item) => item.id === id)?.name ?? "Unassigned";
   return <section className="logwrap"><div className="logtools"><input aria-label="Search appointments" placeholder="Search customer or confirmation" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Territory filter" value={territory} onChange={(event) => setTerritory(event.target.value)}><option value="ALL">All territories</option><option value="SAC">Sacramento</option><option value="EB">East Bay</option></select><select aria-label="Status filter" value={status} onChange={(event) => setStatus(event.target.value)}><option value="ALL">All statuses</option>{["Scheduled", "Confirmed", "Expired", "Cancelled"].map((item) => <option key={item}>{item}</option>)}</select><span className="spacer" />{rows.length} appointments</div>
-    <table className="log"><thead><tr><th>Confirmation</th><th>Customer</th><th>Date & time</th><th>Territory</th><th>Rep</th><th>Status</th><th>Actions</th></tr></thead><tbody>{rows.map((appointment) => <tr key={appointment.id}><td><b>{appointment.confirmation}</b></td><td>{appointment.customerName}<div className="ctx">{appointment.phone}</div></td><td>{prettyDate(appointment.date)}<div className="ctx">{slotLabel(appointment.slot)}</div></td><td><span className={`tag ${appointment.territoryId === "SAC" ? "tag-sac" : "tag-eb"}`}>{appointment.territoryId === "SAC" ? "Sacramento" : "East Bay"}</span></td><td><select className="assign-select" aria-label={`Assign ${appointment.confirmation}`} value={appointment.repId} disabled={appointment.status === "Cancelled"} onChange={(event) => assign(appointment, event.target.value)}><option value="">Unassigned</option>{data.reps.filter((item) => item.active && (appointment.territoryId === "SAC" ? item.sacramentoEligible : item.eastBayEligible)).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><div className="ctx">{rep(appointment.repId)}</div></td><td><span className={`stat ${appointment.status.toLowerCase()}`}>{appointment.status}</span></td><td>{appointment.status !== "Cancelled" && <><button className="rowbtn" onClick={() => open({ type: "reschedule", appointment })}>Reschedule</button><button className="rowbtn danger" onClick={() => cancel(appointment)}>Cancel</button></>}</td></tr>)}</tbody></table>
+    <table className="log"><thead><tr><th>Confirmation</th><th>Customer</th><th>Date & time</th><th>Territory</th><th>Rep</th><th>Status</th><th>Actions</th></tr></thead><tbody>{rows.map((appointment) => <tr key={appointment.id}><td><b>{appointment.confirmation}</b></td><td>{appointment.customerName}<div className="ctx">{appointment.phone}</div></td><td>{prettyDate(appointment.date)}<div className="ctx">{slotLabel(appointment.slot)}</div></td><td><span className={`tag ${appointment.territoryId === "SAC" ? "tag-sac" : "tag-eb"}`}>{appointment.territoryId === "SAC" ? "Sacramento" : "East Bay"}</span></td><td><select className="assign-select" aria-label={`Assign ${appointment.confirmation}`} value={appointment.repId} disabled={appointment.status === "Cancelled"} onChange={(event) => assign(appointment, event.target.value)}><option value="">Unassigned</option>{data.reps.filter((item) => item.active && (appointment.territoryId === "SAC" ? item.sacramentoEligible : item.eastBayEligible)).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><div className="ctx">{rep(appointment.repId)}</div></td><td><span className={`stat ${appointment.status.toLowerCase()}`}>{appointment.status}</span></td><td>{appointment.status !== "Cancelled" && <><button className="rowbtn" onClick={() => open({ type: "reschedule", appointment })}>Reschedule</button><button className="rowbtn danger" onClick={() => open({ type: "cancel-appointment", appointment })}>Cancel</button></>}</td></tr>)}</tbody></table>
   </section>;
 }
 
 function ModalPanel({ modal, data, stateFor, busy, close, choose, submit }: {
   modal: Exclude<Modal, null>; data: CalendarPayload; stateFor: (id: TerritoryId, date: string, slot: string, omitId?: string) => CellState; busy: boolean; close: () => void; choose: (modal: Modal) => void; submit: (work: () => Promise<unknown>, success: string) => Promise<void>;
 }) {
-  const context = modal.type === "reps" ? "Team access and appointment eligibility" : modal.type === "bulk-block" ? "Multiple locations, dates, and appointment times" : modal.type === "reschedule" ? modal.appointment.confirmation : `${modal.territoryId === "SAC" ? "Sacramento" : "East Bay"} · ${prettyDate(modal.date)} · ${slotLabel(modal.slot)}`;
+  const appointment = ["appointment", "reschedule", "cancel-appointment"].includes(modal.type)
+    ? (modal as { appointment: Appointment }).appointment
+    : null;
+  const title = modal.type === "choose" ? "Choose an action"
+    : modal.type === "book" ? "New appointment"
+      : modal.type === "block" ? "Block capacity"
+        : modal.type === "bulk-block" ? "Bulk block times"
+          : modal.type === "appointment" ? "Appointment details"
+            : modal.type === "reschedule" ? "Reschedule appointment"
+              : modal.type === "cancel-appointment" ? "Cancel appointment"
+                : modal.type === "remove-block" ? "Remove block"
+                  : "Manage users";
+  const context = modal.type === "reps" ? "Team access and appointment eligibility"
+    : modal.type === "bulk-block" ? "Multiple locations, dates, and appointment times"
+      : modal.type === "remove-block" ? `${modal.block.territoryId === "SAC" ? "Sacramento" : "East Bay"} · ${modal.block.date ? prettyDate(modal.block.date) : "Recurring"} · ${slotLabel(modal.block.slot)}`
+        : appointment ? appointment.confirmation
+          : "territoryId" in modal
+            ? `${modal.territoryId === "SAC" ? "Sacramento" : "East Bay"} · ${prettyDate(modal.date)} · ${slotLabel(modal.slot)}`
+            : "";
+  const destructive = modal.type === "cancel-appointment" || modal.type === "remove-block";
   return <div className="scrim" onMouseDown={(event) => event.target === event.currentTarget && close()}><section className="modal" role="dialog" aria-modal="true" aria-label="Calendar action">
-    <div className="mh"><div><h2>{modal.type === "choose" ? "Choose an action" : modal.type === "book" ? "New appointment" : modal.type === "block" ? "Block capacity" : modal.type === "bulk-block" ? "Bulk block times" : modal.type === "reschedule" ? "Reschedule appointment" : "Manage users"}</h2><div className="ctx">{context}</div></div></div>
+    <div className={`mh ${destructive ? "danger-head" : ""}`}><span className="modal-mark" aria-hidden="true">{destructive ? "!" : modal.type === "appointment" || modal.type === "reschedule" ? "ES" : modal.type === "book" ? "+" : "◆"}</span><div className="modal-heading"><h2>{title}</h2><div className="ctx">{context}</div></div><button type="button" className="modal-close" aria-label="Close dialog" onClick={close}>×</button></div>
     {modal.type === "choose" ? <div className="mb choice"><button onClick={() => choose({ ...modal, type: "book" })}><span className="big">＋</span><span className="lb">Book appointment</span><div className="ds">Assign a customer and rep</div></button><button onClick={() => choose({ ...modal, type: "block" })}><span className="big">▨</span><span className="lb">Block time</span><div className="ds">Reduce territory capacity</div></button></div>
       : modal.type === "book" ? <BookForm modal={modal} data={data} state={stateFor(modal.territoryId, modal.date, modal.slot)} busy={busy} close={close} submit={submit} />
       : modal.type === "block" ? <BlockForm modal={modal} data={data} state={stateFor(modal.territoryId, modal.date, modal.slot)} busy={busy} close={close} submit={submit} />
       : modal.type === "bulk-block" ? <BulkBlockForm data={data} busy={busy} close={close} submit={submit} />
+      : modal.type === "appointment" ? <AppointmentActions appointment={modal.appointment} data={data} close={close} choose={choose} />
       : modal.type === "reschedule" ? <RescheduleForm appointment={modal.appointment} data={data} busy={busy} close={close} submit={submit} />
+      : modal.type === "cancel-appointment" ? <CancelAppointment appointment={modal.appointment} busy={busy} close={close} submit={submit} />
+      : modal.type === "remove-block" ? <RemoveBlock block={modal.block} busy={busy} close={close} submit={submit} />
       : <RepForm data={data} busy={busy} close={close} submit={submit} />}
     {modal.type === "choose" && <div className="mf"><button className="btn ghost" onClick={close}>Cancel</button></div>}
   </section></div>;
+}
+
+function AppointmentActions({ appointment, data, close, choose }: {
+  appointment: Appointment; data: CalendarPayload; close: () => void; choose: (modal: Modal) => void;
+}) {
+  const assigned = data.reps.find((rep) => rep.id === appointment.repId)?.name ?? "Unassigned";
+  return <><div className="mb appointment-panel"><div className="appointment-hero"><span className="appointment-avatar">{appointmentInitials(appointment)}</span><div><b>{appointment.customerName}</b><span>{appointment.customerEmail || appointment.phone || "No contact details"}</span></div><span className={`stat ${appointment.status.toLowerCase()}`}>{appointment.status}</span></div><div className="detail-grid"><div><span>Date and time</span><b>{prettyDate(appointment.date)} · {slotLabel(appointment.slot)}</b></div><div><span>Territory</span><b>{appointment.territoryId === "SAC" ? "Sacramento" : "East Bay"}</b></div><div><span>Assigned to</span><b>{assigned}</b></div><div><span>Confirmation</span><b>{appointment.confirmation}</b></div></div>{appointment.address && <div className="service-address"><span>Service address</span><b>{appointment.address}{appointment.zip ? ` · ${appointment.zip}` : ""}</b></div>}</div><div className="mf action-footer"><button type="button" className="btn danger" onClick={() => choose({ type: "cancel-appointment", appointment })}>Cancel appointment</button><span className="spacer" /><button type="button" className="btn ghost" onClick={close}>Close</button><button type="button" className="btn primary" onClick={() => choose({ type: "reschedule", appointment })}>Reschedule</button></div></>;
+}
+
+function CancelAppointment({ appointment, busy, close, submit }: {
+  appointment: Appointment; busy: boolean; close: () => void; submit: (work: () => Promise<unknown>, success: string) => Promise<void>;
+}) {
+  return <><div className="mb confirm-panel"><p>Cancel the appointment for <b>{appointment.customerName}</b>?</p><div className="confirm-summary"><span>{prettyDate(appointment.date)} · {slotLabel(appointment.slot)}</span><b>{appointment.territoryId === "SAC" ? "Sacramento" : "East Bay"} · {appointment.confirmation}</b></div><div className="danger-note">This cancels the booking in Cal.com and releases its capacity. This action cannot be undone.</div></div><div className="mf"><button type="button" className="btn ghost" onClick={close}>Keep appointment</button><button type="button" className="btn danger solid" disabled={busy} onClick={() => void submit(() => api(`/api/appointments/${appointment.id}`, { method: "PATCH", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ action: "cancel" }) }), "Appointment cancelled")}>{busy ? "Cancelling…" : "Cancel appointment"}</button></div></>;
+}
+
+function RemoveBlock({ block, busy, close, submit }: {
+  block: CapacityBlock; busy: boolean; close: () => void; submit: (work: () => Promise<unknown>, success: string) => Promise<void>;
+}) {
+  return <><div className="mb confirm-panel"><p>Remove this {block.recurrence === "weekly" ? "recurring " : ""}capacity block?</p><div className="confirm-summary"><span>{block.territoryId === "SAC" ? "Sacramento" : "East Bay"} · {slotLabel(block.slot)}</span><b>{block.reason || "Capacity block"}</b></div><div className="danger-note">{block.recurrence === "weekly" ? "Every occurrence in this recurring block will be removed and synced with Cal.com." : "The seat will become available again after the removal is synced with Cal.com."}</div></div><div className="mf"><button type="button" className="btn ghost" onClick={close}>Keep blocked</button><button type="button" className="btn danger solid" disabled={busy} onClick={() => void submit(() => api(`/api/blocks/${block.ruleId}`, { method: "DELETE" }), "Capacity block removed")}>{busy ? "Removing…" : "Remove block"}</button></div></>;
 }
 
 function BookForm({ modal, data, state, busy, close, submit }: { modal: SlotContext; data: CalendarPayload; state: CellState; busy: boolean; close: () => void; submit: (work: () => Promise<unknown>, success: string) => Promise<void> }) {

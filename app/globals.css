@@ -12,6 +12,8 @@
   --panel: #ffffff;
   --bg: #f4f6f8;
   --navy: #152238;
+  --appointment: #2463a6;
+  --appointment-dark: #194f89;
   --gold: #c9a227;
   --shadow: 0 1px 3px rgba(20, 34, 56, 0.08),
     0 6px 20px rgba(20, 34, 56, 0.06);
@@ -839,12 +841,13 @@ header.top {
   height: 15px;
   flex: none;
   border-radius: 4px;
-  background: repeating-linear-gradient(
+  background-color: var(--blk);
+  background-image: repeating-linear-gradient(
     45deg,
-    var(--blk),
-    var(--blk) 3px,
-    #f4b5b1 3px,
-    #f4b5b1 6px
+    transparent,
+    transparent 5px,
+    rgba(255, 255, 255, 0.32) 5px,
+    rgba(255, 255, 255, 0.32) 10px
   );
 }
 
@@ -1047,10 +1050,40 @@ td.cell {
   font-size: 11.5px;
 }
 
+.appointment-seat {
+  width: 100%;
+  min-width: 0;
+  border-color: var(--appointment-dark);
+  background: var(--appointment);
+  color: #fff;
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(36, 99, 166, 0.2);
+  transition: background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.appointment-seat:hover {
+  background: var(--appointment-dark);
+  box-shadow: 0 3px 8px rgba(25, 79, 137, 0.28);
+  transform: translateY(-1px);
+}
+
+.appointment-seat:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -3px;
+}
+
 .seat .rp {
   width: 17px;
   height: 17px;
   font-size: 8px;
+}
+
+.appointment-seat .rp {
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
 }
 
 .seat .cn {
@@ -1058,6 +1091,17 @@ td.cell {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.appointment-seat .cn {
+  flex: 1;
+}
+
+.seat-action {
+  flex: none;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 17px;
+  line-height: 1;
 }
 
 .seat.expired {
@@ -1118,16 +1162,26 @@ td.cell {
   justify-content: center;
   width: 100%;
   border: 0;
-  background: repeating-linear-gradient(
+  background-color: var(--blk);
+  background-image: repeating-linear-gradient(
     45deg,
-    var(--blk),
-    var(--blk) 5px,
-    #e06a63 5px,
-    #e06a63 10px
+    transparent,
+    transparent 6px,
+    rgba(255, 255, 255, 0.32) 6px,
+    rgba(255, 255, 255, 0.32) 12px
   );
   color: #fff;
   font-size: 10.5px;
   font-weight: 700;
+}
+
+.blocked.blockseat {
+  cursor: pointer;
+}
+
+.blocked.blockseat:hover {
+  background-color: #b82b24;
+  filter: brightness(0.96);
 }
 
 table.month th {
@@ -1209,14 +1263,15 @@ table.month td.sun {
 }
 
 .mslot.blk {
-  background: repeating-linear-gradient(
+  background-color: var(--blk);
+  background-image: repeating-linear-gradient(
     45deg,
-    #fbe7e5,
-    #fbe7e5 4px,
-    #f6d4d1 4px,
-    #f6d4d1 8px
+    transparent,
+    transparent 5px,
+    rgba(255, 255, 255, 0.32) 5px,
+    rgba(255, 255, 255, 0.32) 10px
   );
-  color: #b5453e;
+  color: #fff;
 }
 
 .sched {
@@ -1334,14 +1389,15 @@ button.scell {
 }
 
 .scell.blk {
-  background: repeating-linear-gradient(
+  background-color: var(--blk);
+  background-image: repeating-linear-gradient(
     45deg,
-    #fbe7e5,
-    #fbe7e5 6px,
-    #f6d4d1 6px,
-    #f6d4d1 12px
+    transparent,
+    transparent 7px,
+    rgba(255, 255, 255, 0.32) 7px,
+    rgba(255, 255, 255, 0.32) 14px
   );
-  color: #b5453e;
+  color: #fff;
 }
 
 .scell.conflict {
@@ -1545,25 +1601,80 @@ table.log tr:hover td {
 
 .modal {
   width: 100%;
-  max-width: 440px;
+  max-width: 520px;
   max-height: calc(100vh - 40px);
   overflow: auto;
-  border-radius: 16px;
+  border: 1px solid rgba(21, 34, 56, 0.08);
+  border-radius: 18px;
   background: #fff;
-  box-shadow: 0 20px 60px rgba(20, 34, 56, 0.3);
+  box-shadow: 0 24px 72px rgba(20, 34, 56, 0.32);
+}
+
+.modal:has(.bulk-block-form) {
+  max-width: 700px;
 }
 
 .modal .mh {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 16px 20px;
+  gap: 12px;
+  padding: 18px 20px;
   border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #fff, #fafbfd);
+}
+
+.modal .mh.danger-head {
+  border-bottom-color: #f3d0cd;
+  background: linear-gradient(180deg, #fff, #fff7f6);
+}
+
+.modal-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 10px;
+  background: #e8f0fa;
+  color: var(--appointment-dark);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.danger-head .modal-mark {
+  background: #fde7e5;
+  color: var(--blk);
+  font-size: 17px;
+}
+
+.modal-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.modal-close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  background: #edf1f5;
+  color: var(--ink);
 }
 
 .modal .mh h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 17px;
+  letter-spacing: -0.15px;
 }
 
 .modal .ctx {
@@ -1581,6 +1692,117 @@ table.log tr:hover td {
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid var(--line);
+}
+
+.appointment-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.appointment-hero {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--line);
+}
+
+.appointment-avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--appointment);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.appointment-hero > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.appointment-hero > div > b {
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appointment-hero > div > span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detail-grid > div,
+.service-address,
+.confirm-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafbfd;
+}
+
+.detail-grid span,
+.service-address span,
+.confirm-summary span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+  text-transform: uppercase;
+}
+
+.detail-grid b,
+.service-address b,
+.confirm-summary b {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.action-footer .spacer {
+  flex: 1;
+}
+
+.confirm-panel p {
+  margin: 0 0 15px;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.confirm-summary {
+  margin-bottom: 12px;
+}
+
+.danger-note {
+  padding: 11px 12px;
+  border: 1px solid #f1cfcc;
+  border-radius: 10px;
+  background: #fff6f5;
+  color: #8f312b;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .choice {
@@ -1713,6 +1935,26 @@ table.log tr:hover td {
 
 .btn.primary:hover {
   background: #0f1a2c;
+}
+
+.btn.danger {
+  border: 1px solid #efc0bc;
+  background: #fff;
+  color: #a42f28;
+}
+
+.btn.danger:hover {
+  background: #fff2f1;
+}
+
+.btn.danger.solid {
+  border-color: var(--blk);
+  background: var(--blk);
+  color: #fff;
+}
+
+.btn.danger.solid:hover {
+  background: #b82b24;
 }
 
 .btn:disabled {
