@@ -47,6 +47,15 @@ test("Sacramento exposes two capacity lanes and East Bay exposes one", () => {
   assert.equal(state({ territoryId: "EB" }).openBookable, 1);
 });
 
+test("provider availability caps lanes and closes missing Cal.com slots", () => {
+  assert.equal(state({ providerOpenSeats: 1 }).openBookable, 1);
+  assert.equal(state({ providerOpenSeats: 1 }).providerClosed, false);
+  const closed = state({ providerOpenSeats: 0 });
+  assert.equal(closed.openBookable, 0);
+  assert.deepEqual(closed.openLaneIds, []);
+  assert.equal(closed.providerClosed, true);
+});
+
 test("a partial one-seat block reduces only that date and time", () => {
   const blocks = [{
     id: "b1", ruleId: "r1", territoryId: "SAC", laneId: "sac_a",

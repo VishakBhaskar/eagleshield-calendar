@@ -19,6 +19,7 @@ import {
   seatUidFor,
 } from "@/lib/cal";
 import {
+  addDays,
   addMinutes,
   computeCellState,
   toUtcIso,
@@ -148,7 +149,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (date < zonedDateParts(new Date().toISOString(), snapshot.settings.timeZone).date) {
       throw new UpdateError("Past dates cannot be booked", 400);
     }
-    if (weekday(date) === 0) throw new UpdateError("Sundays are closed", 400);
+    if ([0, 6].includes(weekday(date))) throw new UpdateError("Weekends are closed", 400);
     const state = computeCellState({
       territoryId,
       date,
@@ -177,7 +178,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       const slots = await getAvailableSlots({
         territoryId,
         start: date,
-        end: date,
+        end: addDays(date, 1),
         timeZone: snapshot.settings.timeZone,
         bookingUidToReschedule:
           territoryId === appointment.territoryId ? appointment.calUid : undefined,

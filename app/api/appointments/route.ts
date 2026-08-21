@@ -17,6 +17,7 @@ import {
   seatUidFor,
 } from "@/lib/cal";
 import {
+  addDays,
   addMinutes,
   computeCellState,
   toUtcIso,
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
     const snapshot = await readSnapshot(date, date);
     const today = zonedDateParts(new Date().toISOString(), snapshot.settings.timeZone).date;
     if (date < today) throw new ResponseError("Past dates cannot be booked", 400);
-    if (weekday(date) === 0) throw new ResponseError("Sundays are closed", 400);
+    if ([0, 6].includes(weekday(date))) throw new ResponseError("Weekends are closed", 400);
     if (!snapshot.settings.slots.includes(slot)) throw new ResponseError("Unknown appointment time", 400);
     const state = computeCellState({
       territoryId,
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
       const slots = await getAvailableSlots({
         territoryId,
         start: date,
-        end: date,
+        end: addDays(date, 1),
         timeZone: snapshot.settings.timeZone,
       });
       const available = Object.values(slots)

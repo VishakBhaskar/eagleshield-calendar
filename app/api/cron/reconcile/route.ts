@@ -2,6 +2,7 @@ import { ensureDatabase, getRuntimeEnvironment, writeAudit } from "@/db/runtime"
 import { integrationStatus } from "@/lib/cal";
 import { reconcileCapacityBlocks } from "@/lib/blocks";
 import { reconcileCalBookings } from "@/lib/reconcile";
+import { retryFailedCalWebhooks } from "@/lib/cal-webhooks";
 
 function authorized(request: Request) {
   const env = getRuntimeEnvironment();
@@ -34,18 +35,21 @@ export async function POST(request: Request) {
     const bookings = integration.mode === "live"
       ? await reconcileCalBookings()
       : { scanned: 0, synced: 0, failed: 0 };
+    const webhooks = integration.mode === "live"
+      ? await retryFailedCalWebhooks()
+      : { scanned: 0, retried: 0, processed: 0, failed: 0 };
     await writeAudit({
       actorId: "system-reconciler",
       actorEmail: "",
       action: "cal.reconciled",
       entityType: "integration",
       entityId: "cal.com",
-      detail: { bookings, holds },
+      detail: { bookings, holds, webhooks },
       correlationId: crypto.randomUUID(),
     });
-    const failures = bookings.failed + holds.failed + holds.cancelFailed;
+    const failures = bookings.failed + holds.failed + holds.cancelFailed + webhooks.failed;
     return Response.json(
-      { mode: integration.mode, bookings, holds },
+      { mode: integration.mode, bookings, holds, webhooks },
       { status: failures ? 207 : 200 },
     );
   } finally {

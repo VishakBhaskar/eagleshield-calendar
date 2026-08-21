@@ -72,6 +72,7 @@ async function reconcile() {
         mode: payload.mode,
         bookings: payload.bookings,
         holds: payload.holds,
+        webhooks: payload.webhooks,
       });
     }
   } catch (error) {

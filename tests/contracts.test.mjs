@@ -14,6 +14,8 @@ test("Postgres schema has authentication, concurrency, and idempotency guards", 
     "idx_blocks_active_lane_time",
     "idx_webhook_fingerprint",
     "idx_appointments_external_key",
+    "attempt_count INTEGER",
+    "error_message TEXT",
   ]) assert.match(schema, new RegExp(token));
   assert.doesNotMatch(schema, /event_type_bindings|cal_resource_user_id|cal_user_id/);
 });
@@ -47,6 +49,19 @@ test("Cal integration uses two standalone location accounts and safe seated canc
   assert.match(cal, /Sacramento cancellation was stopped/);
   assert.doesNotMatch(cal, /CAL_TEAM_ID|createCalTeamEventType|addCalTeamMember/);
   assert.match(cal, /attempt < 3/);
+  assert.match(cal, /addDays\(input\.to, 1\)/);
+});
+
+test("calendar availability and webhook failures fail closed and remain repairable", async () => {
+  const calendar = await readFile(new URL("app/api/calendar/route.ts", root), "utf8");
+  const client = await readFile(new URL("app/calendar-app.tsx", root), "utf8");
+  const webhooks = await readFile(new URL("lib/cal-webhooks.ts", root), "utf8");
+  assert.match(calendar, /getProviderAvailability/);
+  assert.match(client, /Closed in Cal\.com/);
+  assert.match(client, /providerOpenSeats/);
+  assert.match(webhooks, /state='failed'/);
+  assert.match(webhooks, /attempt_count=attempt_count\+1/);
+  assert.match(webhooks, /retryFailedCalWebhooks/);
 });
 
 test("bulk blocking supports ranges, weekdays, locations, times, and per-location seats", async () => {

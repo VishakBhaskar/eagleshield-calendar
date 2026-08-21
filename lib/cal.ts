@@ -5,6 +5,7 @@ import {
   webhookSecretFor,
 } from "@/db/runtime";
 import type { TerritoryId } from "@/lib/types";
+import { addDays, localDateAndSlot } from "@/lib/domain.mjs";
 
 export class CalApiError extends Error {
   status: number;
@@ -154,8 +155,43 @@ export async function getAvailableSlots(input: {
     query.set("bookingUidToReschedule", input.bookingUidToReschedule);
   }
   return calRequest<
-    Record<string, Array<{ start: string; end?: string; attendeesCount?: number; bookingUid?: string }>>
+    Record<string, Array<{
+      start: string;
+      end?: string;
+      attendeesCount?: number;
+      bookingUid?: string;
+      seatsBooked?: number;
+      seatsRemaining?: number;
+      seatsTotal?: number;
+    }>>
   >(input.territoryId, `/slots?${query.toString()}`, "2024-09-04");
+}
+
+export async function getProviderAvailability(input: {
+  territoryId: TerritoryId;
+  from: string;
+  to: string;
+  timeZone: string;
+}) {
+  const slots = await getAvailableSlots({
+    territoryId: input.territoryId,
+    start: input.from,
+    end: addDays(input.to, 1),
+    timeZone: input.timeZone,
+  });
+  const capacity = input.territoryId === "SAC" ? 2 : 1;
+  const availability: Record<string, number> = {};
+  for (const candidate of Object.values(slots).flat()) {
+    const local = localDateAndSlot(candidate.start, input.timeZone);
+    const remaining =
+      candidate.seatsRemaining ??
+      (candidate.seatsTotal !== undefined && candidate.seatsBooked !== undefined
+        ? candidate.seatsTotal - candidate.seatsBooked
+        : Math.max(0, capacity - (candidate.attendeesCount ?? 0)));
+    const key = `${local.date}|${local.slot}`;
+    availability[key] = Math.max(availability[key] ?? 0, remaining);
+  }
+  return availability;
 }
 
 export function createCalBooking(territoryId: TerritoryId, input: CalBookingInput) {

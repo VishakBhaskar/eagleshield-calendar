@@ -164,9 +164,16 @@ CREATE TABLE IF NOT EXISTS webhook_events (
   booking_uid TEXT,
   payload_json TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'received',
+  error_message TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at TIMESTAMPTZ,
   received_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   processed_at TIMESTAMPTZ
 );
+
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_fingerprint ON webhook_events(fingerprint);
 

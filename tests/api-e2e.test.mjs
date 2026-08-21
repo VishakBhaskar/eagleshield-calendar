@@ -38,7 +38,7 @@ function createFakeCal() {
   const groups = new Map();
   const capacities = { SAC: 2, EB: 1 };
   const eventTypes = { SAC: "101", EB: "201" };
-  const state = { unsafeSacramentoCancels: 0, creates: 0, cancels: 0 };
+  const state = { unsafeSacramentoCancels: 0, creates: 0, cancels: 0, slotQueries: [] };
 
   const territoryFromRequest = (request, url) => {
     const key = request.headers.authorization?.replace(/^Bearer\s+/i, "");
@@ -60,7 +60,7 @@ function createFakeCal() {
   });
   const dateRange = (from, to) => {
     const values = [];
-    for (let date = from; date <= to; ) {
+    for (let date = from.slice(0, 10), end = to.slice(0, 10); date < end; ) {
       values.push(date);
       const next = new Date(`${date}T12:00:00Z`);
       next.setUTCDate(next.getUTCDate() + 1);
@@ -98,15 +98,28 @@ function createFakeCal() {
       }
 
       if (request.method === "GET" && url.pathname === "/v2/slots") {
+        state.slotQueries.push({
+          territory,
+          start: url.searchParams.get("start"),
+          end: url.searchParams.get("end"),
+        });
         const data = {};
         for (const date of dateRange(url.searchParams.get("start"), url.searchParams.get("end"))) {
-          if (new Date(`${date}T12:00:00Z`).getUTCDay() === 0) continue;
+          if ([0, 6].includes(new Date(`${date}T12:00:00Z`).getUTCDay())) continue;
           const slots = [];
           for (const time of ["10:00", "13:00", "16:00"]) {
             const start = new Date(`${date}T${time}:00-08:00`).toISOString();
             const group = groups.get(keyFor(territory, start));
             if ((group?.seats.length ?? 0) < capacities[territory]) {
-              slots.push({ start, end: new Date(new Date(start).getTime() + 120 * 60_000).toISOString(), attendeesCount: group?.seats.length ?? 0, bookingUid: group?.uid });
+              slots.push({
+                start,
+                end: new Date(new Date(start).getTime() + 120 * 60_000).toISOString(),
+                attendeesCount: group?.seats.length ?? 0,
+                seatsBooked: group?.seats.length ?? 0,
+                seatsRemaining: capacities[territory] - (group?.seats.length ?? 0),
+                seatsTotal: capacities[territory],
+                bookingUid: group?.uid,
+              });
             }
           }
           if (slots.length) data[date] = slots;
@@ -317,6 +330,10 @@ test("Railway app, two Cal locations, seated holds, bulk blocks, auth, assignmen
     const setup = await request("/api/setup/cal", { method: "POST", cookie: master.cookie, body: "{}" });
     assert.equal(setup.healthy, true);
     assert.equal(setup.locations.find((item) => item.territoryId === "SAC").seats, 2);
+    const initialAvailability = await request("/api/calendar?from=2027-01-11&to=2027-01-18", { cookie: master.cookie });
+    assert.equal(initialAvailability.providerAvailability.mode, "provider");
+    assert.equal(initialAvailability.providerAvailability.slots.SAC["2027-01-15|16:00"], 2);
+    assert.equal(initialAvailability.providerAvailability.slots.SAC["2027-01-16|10:00"], undefined);
 
     const createdUser = await request("/api/reps", {
       method: "POST",
@@ -395,6 +412,20 @@ test("Railway app, two Cal locations, seated holds, bulk blocks, auth, assignmen
         body: JSON.stringify({ customerName: email, customerEmail: email, territoryId: "SAC", date: "2027-01-11", slot: "16:00" }),
       });
     }
+    const lateFriday = await request("/api/appointments", {
+      method: "POST", cookie: manager.cookie, expected: 201, headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ customerName: "Late Friday", customerEmail: "latefriday@example.com", territoryId: "SAC", date: "2027-01-15", slot: "16:00" }),
+    });
+    const calStateAfterLateBooking = await fetch(`${calBase}/__state`).then((response) => response.json());
+    assert.ok(calStateAfterLateBooking.slotQueries.some((query) => query.start === "2027-01-15" && query.end === "2027-01-16"));
+    await request(`/api/appointments/${lateFriday.appointment.id}`, {
+      method: "PATCH", cookie: manager.cookie, headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ action: "reschedule", date: "2027-01-22", slot: "16:00" }),
+    });
+    await request("/api/appointments", {
+      method: "POST", cookie: manager.cookie, expected: 400, headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ customerName: "Weekend", customerEmail: "weekend@example.com", territoryId: "SAC", date: "2027-01-16", slot: "10:00" }),
+    });
     await request("/api/appointments", {
       method: "POST", cookie: manager.cookie, expected: 409, headers: { "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify({ customerName: "Third", customerEmail: "third@example.com", territoryId: "SAC", date: "2027-01-11", slot: "16:00" }),
@@ -443,6 +474,24 @@ test("Railway app, two Cal locations, seated holds, bulk blocks, auth, assignmen
       body: webhookBody,
     });
     assert.match(JSON.stringify(duplicate), /"duplicate":true/, "duplicate webhook response");
+    const failedWebhookBody = JSON.stringify({
+      triggerEvent: "BOOKING_CANCELLED",
+      createdAt: new Date().toISOString(),
+      payload: { uid: "seatless-sacramento", eventTypeId: 101 },
+    });
+    await request("/api/webhooks/cal", {
+      method: "POST", expected: 500,
+      headers: { "x-eagle-test-webhook": "true", "x-eagle-cal-territory": "SAC" },
+      body: failedWebhookBody,
+    });
+    await request("/api/webhooks/cal", {
+      method: "POST", expected: 500,
+      headers: { "x-eagle-test-webhook": "true", "x-eagle-cal-territory": "SAC" },
+      body: failedWebhookBody,
+    });
+    const degradedHealth = await request("/api/health");
+    assert.equal(degradedHealth.checks.failedWebhooks, 1);
+    assert.equal(degradedHealth.checks.failedWebhookAttempts, 2);
     const snapshot = await request("/api/calendar?from=2027-01-11&to=2027-01-18", { cookie: manager.cookie });
     assert.ok(snapshot.appointments.some((appointment) => appointment.customerEmail === "webhook@example.com" && appointment.repId === ""));
     assert.equal(snapshot.blocks.filter((block) => block.ruleId === bulk.ruleId).length, 6);
@@ -473,13 +522,16 @@ test("Railway app, two Cal locations, seated holds, bulk blocks, auth, assignmen
 
     const repair = await request("/api/cron/reconcile", {
       method: "POST",
+      expected: 207,
       headers: { Authorization: "Bearer cron-e2e-secret" },
       body: "{}",
     });
     assert.equal(repair.mode, "live");
     assert.ok(repair.bookings.scanned > 0);
+    assert.deepEqual(repair.webhooks, { scanned: 1, retried: 1, processed: 0, failed: 1 });
     const health = await request("/api/health");
     assert.equal(health.database, "ok");
+    assert.equal(health.checks.failedWebhookAttempts, 3);
 
     await request("/api/auth/logout", { method: "POST", cookie: manager.cookie, body: "{}" });
     await request("/api/calendar?from=2027-01-01&to=2027-01-31", { cookie: manager.cookie, expected: 401 });

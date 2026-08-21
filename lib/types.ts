@@ -87,7 +87,10 @@ export interface CellState {
   openBookable: number;
   full: boolean;
   cutoff: boolean;
+  providerClosed: boolean;
 }
+
+export type ProviderAvailability = Record<TerritoryId, Record<string, number>>;
 
 export interface CalendarPayload {
   territories: Territory[];
@@ -107,6 +110,12 @@ export interface CalendarPayload {
     mode: "mock" | "live";
     healthy: boolean;
     message: string;
+  };
+  providerAvailability: {
+    mode: "local" | "provider";
+    from: string;
+    to: string;
+    slots: ProviderAvailability;
   };
   currentUser: {
     id: string;

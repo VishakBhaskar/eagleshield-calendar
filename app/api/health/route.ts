@@ -8,9 +8,10 @@ export async function GET() {
     const db = await ensureDatabase();
     const env = getRuntimeEnvironment();
     const integration = integrationStatus();
-    const [failedWebhooks, unsyncedAppointments, unsyncedBlocks, masterAdmins, lastReconcile] =
+    const [failedWebhooks, failedWebhookAttempts, unsyncedAppointments, unsyncedBlocks, masterAdmins, lastReconcile] =
       await db.batch([
         db.prepare("SELECT COUNT(*)::int AS count FROM webhook_events WHERE state='failed'"),
+        db.prepare("SELECT COALESCE(SUM(attempt_count),0)::int AS count FROM webhook_events WHERE state='failed'"),
         db.prepare("SELECT COUNT(*)::int AS count FROM appointments WHERE sync_state!='synced'"),
         db.prepare(
           `SELECT COUNT(*)::int AS count FROM capacity_blocks
@@ -28,6 +29,7 @@ export async function GET() {
     ].filter(Boolean);
     const checks = {
       failedWebhooks: value(failedWebhooks),
+      failedWebhookAttempts: value(failedWebhookAttempts),
       unsyncedAppointments: value(unsyncedAppointments),
       unsyncedCapacityHolds: value(unsyncedBlocks),
       activeMasterAdmins: value(masterAdmins),

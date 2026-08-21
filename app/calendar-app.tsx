@@ -44,6 +44,12 @@ const emptyPayload: CalendarPayload = {
     slots: ["10:00", "13:00", "16:00"],
   },
   integration: { mode: "mock", healthy: true, message: "Local mode" },
+  providerAvailability: {
+    mode: "local",
+    from: new Date().toISOString().slice(0, 10),
+    to: new Date().toISOString().slice(0, 10),
+    slots: { SAC: {}, EB: {} },
+  },
   currentUser: { id: "", name: "", email: "", role: "staff" },
   serverNow: new Date().toISOString(),
 };
@@ -123,8 +129,15 @@ export function CalendarApp() {
     if (!quiet) setLoading(true);
     try {
       const year = Number(anchor.slice(0, 4));
+      const availabilityDates = tab === "calendar" && view === "month"
+        ? monthCells(anchor).filter((cell) => cell.current).map((cell) => cell.date)
+        : weekDates(anchor);
+      const availabilityFrom = availabilityDates[0];
+      const availabilityTo = availabilityDates[availabilityDates.length - 1];
+      const dataFrom = availabilityFrom < `${year}-01-01` ? availabilityFrom : `${year}-01-01`;
+      const dataTo = availabilityTo > `${year}-12-31` ? availabilityTo : `${year}-12-31`;
       const payload = await api<CalendarPayload>(
-        `/api/calendar?from=${year}-01-01&to=${year}-12-31`,
+        `/api/calendar?from=${dataFrom}&to=${dataTo}&availabilityFrom=${availabilityFrom}&availabilityTo=${availabilityTo}`,
       );
       setData(payload);
       setError("");
@@ -133,7 +146,7 @@ export function CalendarApp() {
     } finally {
       setLoading(false);
     }
-  }, [anchor]);
+  }, [anchor, tab, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -164,8 +177,12 @@ export function CalendarApp() {
   }, []);
 
   const stateFor = useCallback(
-    (territoryId: TerritoryId, date: string, slot: string, omitId?: string): CellState =>
-      computeCellState({
+    (territoryId: TerritoryId, date: string, slot: string, omitId?: string): CellState => {
+      const providerRangeApplies =
+        data.providerAvailability.mode === "provider" &&
+        date >= data.providerAvailability.from &&
+        date <= data.providerAvailability.to;
+      return computeCellState({
         territoryId,
         date,
         slot,
@@ -177,7 +194,11 @@ export function CalendarApp() {
         blocks: data.blocks,
         settings: data.settings,
         now: data.serverNow,
-      }),
+        providerOpenSeats: providerRangeApplies
+          ? data.providerAvailability.slots[territoryId][`${date}|${slot}`] ?? 0
+          : undefined,
+      });
+    },
     [data],
   );
 
@@ -448,7 +469,7 @@ function TerritoryCell({ data, territoryId, date, slot, state, open, reload, not
     <div className="hd"><span className="dot" style={{ background: territoryId === "SAC" ? "var(--sac)" : "var(--eb)" }} />{territoryId === "SAC" ? "Sacramento" : "East Bay"}</div>
     {state.booked.map((appointment) => <div className={`seat ${appointment.status === "Expired" ? "expired" : ""}`} key={appointment.id} title={`${appointment.confirmation} · ${rep(appointment.repId)?.name ?? "Unassigned"}`}><span className="rp">{rep(appointment.repId)?.initials ?? "?"}</span><span className="cn">{appointment.customerName}</span></div>)}
     {applicable.map((block) => <button className="norep blockseat" key={block.id} onClick={() => void remove(block)}>Blocked · click to remove</button>)}
-    {state.cutoff ? <button className="blocked" disabled>After-hours cutoff</button> : <>
+    {state.cutoff ? <button className="blocked" disabled>After-hours cutoff</button> : state.providerClosed ? <button className="blocked" disabled>Closed in Cal.com</button> : <>
       {Array.from({ length: state.openBookable }, (_, index) => <button className="seatopen" key={`open-${index}`} onClick={() => open({ type: "choose", territoryId, date, slot })}>＋ Open seat</button>)}
       {Array.from({ length: Math.max(0, openSlots - state.openBookable) }, (_, index) => <button className="norep" key={`norep-${index}`} disabled>No eligible rep</button>)}
     </>}
@@ -462,9 +483,11 @@ function MonthGrid(props: CalendarProps) {
     const sunday = asDate(cell.date).getUTCDay() === 0;
     const counts = props.data.settings.slots.map((slot) => props.data.territories.filter((territory) => props.visible[territory.id]).reduce((sum, territory) => sum + props.stateFor(territory.id, cell.date, slot).openBookable, 0));
     const cutoff = props.data.territories.some((territory) => props.stateFor(territory.id, cell.date, props.data.settings.slots[0]).cutoff);
+    const visibleTerritories = props.data.territories.filter((territory) => props.visible[territory.id]);
+    const providerClosed = visibleTerritories.length > 0 && visibleTerritories.every((territory) => props.stateFor(territory.id, cell.date, props.data.settings.slots[0]).providerClosed);
     return <td key={cell.date} className={`${cell.current ? "" : "dim"} ${sunday ? "sun" : ""} ${cell.date === today ? "mtoday" : ""}`} onClick={() => { if (!sunday && cell.current) { props.setAnchor(cell.date); props.setView("week"); } }}>
-      <div className="mday">{Number(cell.date.slice(8))}{cutoff && <span className="mcutt">cutoff</span>}</div>
-      {cell.current && !sunday && <div className="mslots">{props.data.settings.slots.map((slot, index) => <div className={`mslot ${cutoff ? "blk" : counts[index] ? "open" : "zero"}`} key={slot}><span>{slotLabel(slot)}</span><b>{counts[index]}</b></div>)}</div>}
+      <div className="mday">{Number(cell.date.slice(8))}{cutoff && <span className="mcutt">cutoff</span>}{!cutoff && providerClosed && <span className="mcutt">closed</span>}</div>
+      {cell.current && !sunday && <div className="mslots">{props.data.settings.slots.map((slot, index) => <div className={`mslot ${cutoff || providerClosed ? "blk" : counts[index] ? "open" : "zero"}`} key={slot}><span>{slotLabel(slot)}</span><b>{counts[index]}</b></div>)}</div>}
     </td>;
   })}</tr>)}</tbody></table>;
 }
@@ -481,10 +504,10 @@ function SchedulingView({ data, anchor, territoryId, setTerritoryId, stateFor, s
       const tone = !cell.current ? "mh-blank" : openCount === 0 ? "mh-full" : openCount < capacity ? "mh-mid" : "mh-open";
       return <td key={cell.date} className={`${tone} ${cell.date === anchor ? "sel" : ""}`} onClick={() => cell.current && setAnchor(cell.date)}>{cell.current ? Number(cell.date.slice(8)) : ""}</td>;
     })}</tr>)}</tbody></table><div className="sched-legend"><div className="row"><span className="box" style={{ background: "#4caf50" }} />Good availability</div><div className="row"><span className="box" style={{ background: "#f4c400" }} />Limited</div><div className="row"><span className="box" style={{ background: "#e0554d" }} />Full / closed</div></div></aside>
-    <section className="sched-main"><div className="sched-head"><div className="fld"><label>Territory</label><select value={territoryId} onChange={(event) => setTerritoryId(event.target.value as TerritoryId)}><option value="SAC">Sacramento</option><option value="EB">East Bay</option></select></div><div><div className="fld"><label>Appointment type</label></div><div className="apptype">Free Estimate · 2 hours</div></div><div className="sched-note">Select a green cell to create an appointment. Availability reflects location capacity, blocks, and cutoff rules.</div></div>
+    <section className="sched-main"><div className="sched-head"><div className="fld"><label>Territory</label><select value={territoryId} onChange={(event) => setTerritoryId(event.target.value as TerritoryId)}><option value="SAC">Sacramento</option><option value="EB">East Bay</option></select></div><div><div className="fld"><label>Appointment type</label></div><div className="apptype">Free Estimate · 2 hours</div></div><div className="sched-note">Select a green cell to create an appointment. Availability reflects Cal.com, location capacity, blocks, and cutoff rules.</div></div>
       <table className="sgrid"><thead><tr><th className="slotlab" />{dates.map((date) => <th key={date}><div className="sd">{dayName(date)}</div><div className="sdt">{Number(date.slice(8))}</div><div className="stot">{data.settings.slots.reduce((sum, slot) => sum + stateFor(territoryId, date, slot).openBookable, 0)} open</div></th>)}</tr></thead><tbody>{data.settings.slots.map((slot) => <tr key={slot}><th className="slotlab">{slotLabel(slot)}</th>{dates.map((date) => {
         const state = stateFor(territoryId, date, slot);
-        return <td key={date}><button className={`scell ${state.cutoff ? "blk" : state.openBookable ? "open" : "zero"}`} disabled={!state.openBookable} onClick={() => open({ type: "book", territoryId, date, slot })}>{state.openBookable}<span className="cq">{state.cutoff ? "cutoff" : "seats"}</span></button></td>;
+        return <td key={date}><button className={`scell ${state.cutoff || state.providerClosed ? "blk" : state.openBookable ? "open" : "zero"}`} disabled={!state.openBookable} onClick={() => open({ type: "book", territoryId, date, slot })}>{state.openBookable}<span className="cq">{state.cutoff ? "cutoff" : state.providerClosed ? "closed" : "seats"}</span></button></td>;
       })}</tr>)}</tbody></table>
     </section>
   </div>;
